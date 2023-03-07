@@ -9,3 +9,11 @@ npm i
 npm run build
 node ./index.js
 ```
+
+# Note for Working with older versions of Node.js
+
+You may need to enable the experimental json modules feature.
+
+```
+node --experimental-json-modules index.js
+```
