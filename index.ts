@@ -5,6 +5,7 @@ import { gzipSize } from "gzip-size";
 import path from "node:path";
 import { Browser, chromium, devices } from "playwright";
 import { max, median } from "simple-statistics";
+import transforms from "./transforms/index.js";
 import slugify from "slugify";
 import tablemark from "tablemark";
 import { fileURLToPath } from "url";
@@ -14,6 +15,11 @@ const __dirname = path.dirname(__filename);
 const ARTICLE_COUNT = 100;
 const SECTIONS_CLICKED: number | "all" = "all";
 const BATCH_SIZE = 10;
+
+interface Transformer {
+  name: string;
+  transform: Function;
+}
 
 /**
  * Scrolls to the bottom of the page.
@@ -72,11 +78,11 @@ async function visitPage(
   browser: Browser,
   url: string,
   slug: string,
-  type: "before" | "after"
+  saveFolder: string
 ) {
   const context = await createContext(browser, {});
   const page = await context.newPage();
-  console.log(`Visiting ${slug} ${type}`);
+  console.log(`Visiting ${slug} and saving image to ${saveFolder}`);
 
   // Sum response size of all image requests.
   let imageTransferSize = 0;
@@ -121,7 +127,7 @@ async function visitPage(
   // Wait for images to load.
   await page.waitForTimeout(3000);
   await page.screenshot({
-    path: path.join(__dirname, `/pages/${type}/${slug}.jpg`),
+    path: path.join(__dirname, `/pages/${saveFolder}/${slug}.jpg`),
   });
 
   // Teardown
@@ -139,7 +145,7 @@ async function visitPage(
  * images without the srcset attribute, the other version will contain lazy
  * loaded images with the srcset attribute.
  */
-async function createVersions(browser: Browser, slug: string) {
+async function createVersions(browser: Browser, slug: string, transformer: Transformer) {
   const desktopImages = await getDesktopImages(browser, slug);
   const context = await createContext(browser, {
     javaScriptEnabled: false,
@@ -154,7 +160,7 @@ async function createVersions(browser: Browser, slug: string) {
     document.head.prepend(base);
   });
   const beforeHtml = await page.content();
-  const beforePath = path.join(__dirname, `/pages/before/${slug}.html`);
+  const beforePath = path.join(__dirname, `/pages/${transformer.name}/before/${slug}.html`);
   await fs.promises.writeFile(beforePath, beforeHtml);
 
   // Transform HTML.
@@ -174,7 +180,7 @@ async function createVersions(browser: Browser, slug: string) {
   }, desktopImages);
 
   const afterHtml = await page.content();
-  const afterPath = path.join(__dirname, `/pages/after/${slug}.html`);
+  const afterPath = path.join(__dirname, `/pages/${transformer.name}/after/${slug}.html`);
   await fs.promises.writeFile(afterPath, afterHtml);
   await context.close();
 
@@ -191,14 +197,15 @@ async function createVersions(browser: Browser, slug: string) {
 (async () => {
   // Setup
   const browser = await chromium.launch();
-  fsExtra.emptyDirSync(path.join(__dirname, "/pages/before"));
-  fsExtra.emptyDirSync(path.join(__dirname, "/pages/after"));
+  const transformer = transforms.addSrcSet;
+  const transformerName = transformer.name;
+  fsExtra.emptyDirSync(path.join(__dirname, `/pages/${transformerName}/before`));
+  fsExtra.emptyDirSync(path.join(__dirname, `/pages/${transformerName}/after`));
 
   const stats = [];
   let queue = topViews.slice(0, ARTICLE_COUNT);
 
-  console.log(`Visiting ${queue.length} pages...`);
-
+  console.log(`Visiting ${queue.length} pages with transform ${transformerName}...`);
   while (queue.length) {
     const views = queue.splice(0, BATCH_SIZE);
 
@@ -207,19 +214,19 @@ async function createVersions(browser: Browser, slug: string) {
       const slug = slugify(view.article, "_");
 
       // Create two versions of the same page.
-      const paths = await createVersions(browser, slug);
+      const paths = await createVersions(browser, slug, transformer);
 
       const beforeStats = await visitPage(
         browser,
         `file:///${paths.before.path}`,
         slug,
-        "before"
+        `${transformer.name}/before`
       );
       const afterStats = await visitPage(
         browser,
         `file:///${paths.after.path}`,
         slug,
-        "after"
+        `${transformer.name}/after`
       );
 
       stats.push({
