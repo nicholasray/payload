@@ -12,8 +12,8 @@ import { fileURLToPath } from "url";
 import topViews from "./topviews.json" assert { type: "json" };
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
-const ARTICLE_COUNT = 100;
-const SECTIONS_CLICKED: number | "all" = "all";
+const ARTICLE_COUNT = 10;
+const SECTIONS_CLICKED: number | "all" = 0;
 const BATCH_SIZE = 10;
 
 interface Transformer {
@@ -63,7 +63,7 @@ async function visitPage(
   let htmlResponseSize = 0;
   let htmlResponseText = "";
 
-  await page.on("requestfinished", async (request) => {
+  page.on("requestfinished", async (request) => {
     if (request.resourceType() === "document") {
       if (htmlResponseSize !== 0) {
         throw new Error(
@@ -82,6 +82,20 @@ async function visitPage(
   });
 
   await page.goto(url, { waitUntil: "networkidle" });
+
+  // Find first paragraph so we can roughly estimate impact of largest contentful paint.
+  const firstParagraph = await page
+    .locator("p:not(.mw-empty-elt)")
+    .first()
+    .evaluate((elem) => elem.outerHTML);
+
+  const endOfFirstParagraphHtml =
+    htmlResponseText.split(firstParagraph).shift() + firstParagraph;
+
+  await fs.promises.writeFile(
+    path.join(__dirname, `/pages/${saveFolder}/p-${slug}.html`),
+    endOfFirstParagraphHtml
+  );
 
   // Click first section
   let sections = await page
@@ -109,6 +123,8 @@ async function visitPage(
 
   return {
     imageTransferSize,
+    htmlSizeParagraph: Buffer.byteLength(endOfFirstParagraphHtml, "utf8"),
+    htmlTransferSizeParagraph: await gzipSize(endOfFirstParagraphHtml),
     htmlSize: Buffer.byteLength(htmlResponseText, "utf8"),
     htmlTransferSize: await gzipSize(htmlResponseText),
   };
@@ -132,13 +148,21 @@ const makePage = async (context, host, path) => {
  * images without the srcset attribute, the other version will contain lazy
  * loaded images with the srcset attribute.
  */
-async function createVersions(browser: Browser, slug: string, transformer: Transformer, host: string) {
+async function createVersions(
+  browser: Browser,
+  slug: string,
+  transformer: Transformer,
+  host: string
+) {
   const context = await createContext(browser, {
     javaScriptEnabled: false,
   });
-  const page = await makePage(context, host, `wiki/${slug}` );
+  const page = await makePage(context, host, `wiki/${slug}`);
   const beforeHtml = await page.content();
-  const beforePath = path.join(__dirname, `/pages/${transformer.name}/before/${slug}.html`);
+  const beforePath = path.join(
+    __dirname,
+    `/pages/${transformer.name}/before/${slug}.html`
+  );
   await fs.promises.writeFile(beforePath, beforeHtml);
 
   // Transform HTML.
@@ -147,7 +171,10 @@ async function createVersions(browser: Browser, slug: string, transformer: Trans
   await page.evaluate(transformer.transform, args);
 
   const afterHtml = await page.content();
-  const afterPath = path.join(__dirname, `/pages/${transformer.name}/after/${slug}.html`);
+  const afterPath = path.join(
+    __dirname,
+    `/pages/${transformer.name}/after/${slug}.html`
+  );
   await fs.promises.writeFile(afterPath, afterHtml);
   await context.close();
 
@@ -164,20 +191,28 @@ async function createVersions(browser: Browser, slug: string, transformer: Trans
 (async () => {
   // Setup
   const clArguments = process.argv;
-  const transform = clArguments[2] || 'addSrcSet';
+  const transform = clArguments[2] || "addSrcSet";
   const browser = await chromium.launch();
   const transformer = transforms[transform];
   if (!transformer) {
-    throw new Error(`Unknown transform name. Available transforms are ${Object.keys(transforms).join(',')}`);
+    throw new Error(
+      `Unknown transform name. Available transforms are ${Object.keys(
+        transforms
+      ).join(",")}`
+    );
   }
   const transformerName = transformer.name;
-  fsExtra.emptyDirSync(path.join(__dirname, `/pages/${transformerName}/before`));
+  fsExtra.emptyDirSync(
+    path.join(__dirname, `/pages/${transformerName}/before`)
+  );
   fsExtra.emptyDirSync(path.join(__dirname, `/pages/${transformerName}/after`));
 
   const stats = [];
   let queue = topViews.slice(0, ARTICLE_COUNT);
 
-  console.log(`Visiting ${queue.length} pages with transform ${transformerName}...`);
+  console.log(
+    `Visiting ${queue.length} pages with transform ${transformerName}...`
+  );
   while (queue.length) {
     const views = queue.splice(0, BATCH_SIZE);
 
@@ -186,7 +221,12 @@ async function createVersions(browser: Browser, slug: string, transformer: Trans
       const slug = slugify(view.article, "_");
 
       // Create two versions of the same page.
-      const paths = await createVersions(browser, slug, transformer, 'https://en.m.wikipedia.org');
+      const paths = await createVersions(
+        browser,
+        slug,
+        transformer,
+        "https://en.m.wikipedia.org"
+      );
 
       const beforeStats = await visitPage(
         browser,
@@ -203,31 +243,50 @@ async function createVersions(browser: Browser, slug: string, transformer: Trans
 
       stats.push({
         page: slug,
+
+        // Image transfer size
+        // beforeImageTransferSize: beforeStats.imageTransferSize,
+        // afterImageTransferSize: afterStats.imageTransferSize,
+        // diffImageTransferSize:
+        //   afterStats.imageTransferSize - beforeStats.imageTransferSize,
+
+        // Html size to the end of the first paragraph
+        beforeHtmlSizeParagraph: beforeStats.htmlSizeParagraph,
+        afterHtmlSizeParagraph: afterStats.htmlSizeParagraph,
+        diffHtmlSizeParagraph:
+          afterStats.htmlSizeParagraph - beforeStats.htmlSizeParagraph,
+
+        // Html transfer size to the end of the first paragraph
+        beforeHtmlTransferSizeParagraph: beforeStats.htmlTransferSizeParagraph,
+        afterHtmlTransferSizeParagraph: afterStats.htmlTransferSizeParagraph,
+        diffHtmlTrasferSizeParagraph:
+          afterStats.htmlTransferSizeParagraph -
+          beforeStats.htmlTransferSizeParagraph,
+
+        // Html size
         beforeHtmlSize: beforeStats.htmlSize,
         afterHtmlSize: afterStats.htmlSize,
         diffHtmlSize: afterStats.htmlSize - beforeStats.htmlSize,
+
+        // Html transfer size
         beforeHtmlTransferSize: beforeStats.htmlTransferSize,
         afterHtmlTransferSize: afterStats.htmlTransferSize,
         diffHtmlTransferSize:
           afterStats.htmlTransferSize - beforeStats.htmlTransferSize,
-        beforeImageTransferSize: beforeStats.imageTransferSize,
-        afterImageTransferSize: afterStats.imageTransferSize,
-        diffImageTransferSize:
-          afterStats.imageTransferSize - beforeStats.imageTransferSize,
       });
     });
 
     await Promise.all(promises);
   }
 
-  // Sort by image size
+  // Sort by html transfer size.
   stats.sort((a, b) => {
-    if (a.diffImageTransferSize < b.diffImageTransferSize) {
+    if (a.diffHtmlTransferSize < b.diffHtmlTransferSize) {
       // a is less than b.
       return -1;
     }
 
-    if (a.diffImageTransferSize > b.diffImageTransferSize) {
+    if (a.diffHtmlTransferSize > b.diffHtmlTransferSize) {
       // b is less than a.
       return 1;
     }
@@ -258,12 +317,12 @@ async function createVersions(browser: Browser, slug: string, transformer: Trans
 
   const aggregate = tablemark([
     {
+      // medianDiffImageTransferSize: filesize(median(diffImageTransferSize)),
+      // maxDiffImageTransferSize: filesize(max(diffImageTransferSize)),
       medianDiffHtmlSize: filesize(median(diffHtmlSize)),
       maxDiffHtmlSize: filesize(max(diffHtmlSize)),
       medianDiffHtmlTransferSize: filesize(median(diffHtmlTransferSize)),
       maxDiffHtmlTransferDiff: filesize(max(diffHtmlTransferSize)),
-      medianDiffImageTransferSize: filesize(median(diffImageTransferSize)),
-      maxDiffImageTransferSize: filesize(max(diffImageTransferSize)),
     },
   ]);
 
