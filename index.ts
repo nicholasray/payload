@@ -140,25 +140,30 @@ async function visitPage(
   };
 }
 
+const makePage = async (context, host, path) => {
+  const page = await context.newPage();
+  await page.goto(`${host}/${path}`, {
+    waitUntil: "load",
+  });
+  await page.evaluate((host) => {
+    const base = document.createElement("base");
+    base.href = host;
+    document.head.prepend(base);
+  }, host);
+  return page;
+};
+
 /**
  * Create two versions of the same page — one version will contain lazy loaded
  * images without the srcset attribute, the other version will contain lazy
  * loaded images with the srcset attribute.
  */
-async function createVersions(browser: Browser, slug: string, transformer: Transformer) {
+async function createVersions(browser: Browser, slug: string, transformer: Transformer, host: string) {
   const desktopImages = await getDesktopImages(browser, slug);
   const context = await createContext(browser, {
     javaScriptEnabled: false,
   });
-  const page = await context.newPage();
-  await page.goto(`https://en.m.wikipedia.org/wiki/${slug}`, {
-    waitUntil: "load",
-  });
-  await page.evaluate(() => {
-    const base = document.createElement("base");
-    base.href = "https://en.m.wikipedia.org";
-    document.head.prepend(base);
-  });
+  const page = await makePage(context, host, `wiki/${slug}` );
   const beforeHtml = await page.content();
   const beforePath = path.join(__dirname, `/pages/${transformer.name}/before/${slug}.html`);
   await fs.promises.writeFile(beforePath, beforeHtml);
@@ -214,7 +219,7 @@ async function createVersions(browser: Browser, slug: string, transformer: Trans
       const slug = slugify(view.article, "_");
 
       // Create two versions of the same page.
-      const paths = await createVersions(browser, slug, transformer);
+      const paths = await createVersions(browser, slug, transformer, 'https://en.m.wikipedia.org');
 
       const beforeStats = await visitPage(
         browser,
