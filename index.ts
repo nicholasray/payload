@@ -18,6 +18,7 @@ const BATCH_SIZE = 10;
 
 interface Transformer {
   name: string;
+  getArgs: Function;
   transform: Function;
 }
 
@@ -41,33 +42,6 @@ async function createContext(browser: Browser, opts = {}) {
     deviceScaleFactor: 2,
     ...opts,
   });
-}
-
-/**
- * Gets the srcset value of all desktop images so that we can transform the
- * mobile site.
- */
-async function getDesktopImages(browser: Browser, slug: string) {
-  const context = await createContext(browser);
-  const page = await context.newPage();
-  await page.goto(`https://en.wikipedia.org/wiki/${slug}?useformat=desktop`, {
-    waitUntil: "networkidle",
-  });
-  const images = await page.evaluate(() => {
-    const dict = {};
-    const thumbImages = document.querySelectorAll("img[srcset]");
-    thumbImages.forEach((thumbImage) => {
-      if (thumbImage instanceof HTMLImageElement) {
-        dict[thumbImage.src] = thumbImage.srcset;
-      }
-    });
-
-    return dict;
-  });
-
-  await context.close();
-
-  return images;
 }
 
 /**
@@ -159,7 +133,6 @@ const makePage = async (context, host, path) => {
  * loaded images with the srcset attribute.
  */
 async function createVersions(browser: Browser, slug: string, transformer: Transformer, host: string) {
-  const desktopImages = await getDesktopImages(browser, slug);
   const context = await createContext(browser, {
     javaScriptEnabled: false,
   });
@@ -169,20 +142,9 @@ async function createVersions(browser: Browser, slug: string, transformer: Trans
   await fs.promises.writeFile(beforePath, beforeHtml);
 
   // Transform HTML.
-  await page.evaluate((desktopImages) => {
-    // Only transform if passed a non-empty desktopImages object.
-    const placeholders = document.querySelectorAll(".lazy-image-placeholder");
-    placeholders.forEach((placeholder) => {
-      if (!(placeholder instanceof HTMLElement)) {
-        return;
-      }
-
-      const srcSet = desktopImages[`https:${placeholder.dataset.src}`];
-      if (srcSet) {
-        placeholder.dataset.srcset = srcSet;
-      }
-    });
-  }, desktopImages);
+  const transformContext = await createContext(browser);
+  const args = await transformer.getArgs(transformContext, slug);
+  await page.evaluate(transformer.transform, args);
 
   const afterHtml = await page.content();
   const afterPath = path.join(__dirname, `/pages/${transformer.name}/after/${slug}.html`);
