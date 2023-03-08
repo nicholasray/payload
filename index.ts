@@ -60,21 +60,8 @@ async function visitPage(
 
   // Sum response size of all image requests.
   let imageTransferSize = 0;
-  let htmlResponseSize = 0;
-  let htmlResponseText = "";
 
   page.on("requestfinished", async (request) => {
-    if (request.resourceType() === "document") {
-      if (htmlResponseSize !== 0) {
-        throw new Error(
-          "Expected html response size to be zero, but was" + htmlResponseSize
-        );
-      }
-      const sizes = await request.sizes();
-      htmlResponseSize += sizes.responseHeadersSize + sizes.responseBodySize;
-      htmlResponseText = await (await request.response()).text();
-    }
-
     if (request.resourceType() === "image") {
       const sizes = await request.sizes();
       imageTransferSize += sizes.responseHeadersSize + sizes.responseBodySize;
@@ -82,6 +69,7 @@ async function visitPage(
   });
 
   await page.goto(url, { waitUntil: "networkidle" });
+  let htmlResponseText = await page.content();
 
   // Find first paragraph so we can roughly estimate impact of largest contentful paint.
   const firstParagraph = await page
