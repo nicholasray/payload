@@ -5,6 +5,7 @@ import { gzipSize } from "gzip-size";
 import path from "node:path";
 import { Browser, chromium, devices } from "playwright";
 import { max, median } from "simple-statistics";
+import transforms from "./transforms/index.js";
 import slugify from "slugify";
 import tablemark from "tablemark";
 import { fileURLToPath } from "url";
@@ -14,6 +15,12 @@ const __dirname = path.dirname(__filename);
 const ARTICLE_COUNT = 100;
 const SECTIONS_CLICKED: number | "all" = "all";
 const BATCH_SIZE = 10;
+
+interface Transformer {
+  name: string;
+  getArgs: Function;
+  transform: Function;
+}
 
 /**
  * Scrolls to the bottom of the page.
@@ -38,33 +45,6 @@ async function createContext(browser: Browser, opts = {}) {
 }
 
 /**
- * Gets the srcset value of all desktop images so that we can transform the
- * mobile site.
- */
-async function getDesktopImages(browser: Browser, slug: string) {
-  const context = await createContext(browser);
-  const page = await context.newPage();
-  await page.goto(`https://en.wikipedia.org/wiki/${slug}?useformat=desktop`, {
-    waitUntil: "networkidle",
-  });
-  const images = await page.evaluate(() => {
-    const dict = {};
-    const thumbImages = document.querySelectorAll("img[srcset]");
-    thumbImages.forEach((thumbImage) => {
-      if (thumbImage instanceof HTMLImageElement) {
-        dict[thumbImage.src] = thumbImage.srcset;
-      }
-    });
-
-    return dict;
-  });
-
-  await context.close();
-
-  return images;
-}
-
-/**
  * Visits a url, clicks a number of sections, scrolls to the bottom of the page,
  * and sums the downloaded html and image transfers.
  */
@@ -72,11 +52,11 @@ async function visitPage(
   browser: Browser,
   url: string,
   slug: string,
-  type: "before" | "after"
+  saveFolder: string
 ) {
   const context = await createContext(browser, {});
   const page = await context.newPage();
-  console.log(`Visiting ${slug} ${type}`);
+  console.log(`Visiting ${slug} and saving image to ${saveFolder}`);
 
   // Sum response size of all image requests.
   let imageTransferSize = 0;
@@ -121,7 +101,7 @@ async function visitPage(
   // Wait for images to load.
   await page.waitForTimeout(3000);
   await page.screenshot({
-    path: path.join(__dirname, `/pages/${type}/${slug}.jpg`),
+    path: path.join(__dirname, `/pages/${saveFolder}/${slug}.jpg`),
   });
 
   // Teardown
@@ -134,47 +114,40 @@ async function visitPage(
   };
 }
 
+const makePage = async (context, host, path) => {
+  const page = await context.newPage();
+  await page.goto(`${host}/${path}`, {
+    waitUntil: "load",
+  });
+  await page.evaluate((host) => {
+    const base = document.createElement("base");
+    base.href = host;
+    document.head.prepend(base);
+  }, host);
+  return page;
+};
+
 /**
  * Create two versions of the same page — one version will contain lazy loaded
  * images without the srcset attribute, the other version will contain lazy
  * loaded images with the srcset attribute.
  */
-async function createVersions(browser: Browser, slug: string) {
-  const desktopImages = await getDesktopImages(browser, slug);
+async function createVersions(browser: Browser, slug: string, transformer: Transformer, host: string) {
   const context = await createContext(browser, {
     javaScriptEnabled: false,
   });
-  const page = await context.newPage();
-  await page.goto(`https://en.m.wikipedia.org/wiki/${slug}`, {
-    waitUntil: "load",
-  });
-  await page.evaluate(() => {
-    const base = document.createElement("base");
-    base.href = "https://en.m.wikipedia.org";
-    document.head.prepend(base);
-  });
+  const page = await makePage(context, host, `wiki/${slug}` );
   const beforeHtml = await page.content();
-  const beforePath = path.join(__dirname, `/pages/before/${slug}.html`);
+  const beforePath = path.join(__dirname, `/pages/${transformer.name}/before/${slug}.html`);
   await fs.promises.writeFile(beforePath, beforeHtml);
 
   // Transform HTML.
-  await page.evaluate((desktopImages) => {
-    // Only transform if passed a non-empty desktopImages object.
-    const placeholders = document.querySelectorAll(".lazy-image-placeholder");
-    placeholders.forEach((placeholder) => {
-      if (!(placeholder instanceof HTMLElement)) {
-        return;
-      }
-
-      const srcSet = desktopImages[`https:${placeholder.dataset.src}`];
-      if (srcSet) {
-        placeholder.dataset.srcset = srcSet;
-      }
-    });
-  }, desktopImages);
+  const transformContext = await createContext(browser);
+  const args = await transformer.getArgs(transformContext, slug);
+  await page.evaluate(transformer.transform, args);
 
   const afterHtml = await page.content();
-  const afterPath = path.join(__dirname, `/pages/after/${slug}.html`);
+  const afterPath = path.join(__dirname, `/pages/${transformer.name}/after/${slug}.html`);
   await fs.promises.writeFile(afterPath, afterHtml);
   await context.close();
 
@@ -190,15 +163,21 @@ async function createVersions(browser: Browser, slug: string) {
 
 (async () => {
   // Setup
+  const clArguments = process.argv;
+  const transform = clArguments[2] || 'addSrcSet';
   const browser = await chromium.launch();
-  fsExtra.emptyDirSync(path.join(__dirname, "/pages/before"));
-  fsExtra.emptyDirSync(path.join(__dirname, "/pages/after"));
+  const transformer = transforms[transform];
+  if (!transformer) {
+    throw new Error(`Unknown transform name. Available transforms are ${Object.keys(transforms).join(',')}`);
+  }
+  const transformerName = transformer.name;
+  fsExtra.emptyDirSync(path.join(__dirname, `/pages/${transformerName}/before`));
+  fsExtra.emptyDirSync(path.join(__dirname, `/pages/${transformerName}/after`));
 
   const stats = [];
   let queue = topViews.slice(0, ARTICLE_COUNT);
 
-  console.log(`Visiting ${queue.length} pages...`);
-
+  console.log(`Visiting ${queue.length} pages with transform ${transformerName}...`);
   while (queue.length) {
     const views = queue.splice(0, BATCH_SIZE);
 
@@ -207,19 +186,19 @@ async function createVersions(browser: Browser, slug: string) {
       const slug = slugify(view.article, "_");
 
       // Create two versions of the same page.
-      const paths = await createVersions(browser, slug);
+      const paths = await createVersions(browser, slug, transformer, 'https://en.m.wikipedia.org');
 
       const beforeStats = await visitPage(
         browser,
         `file:///${paths.before.path}`,
         slug,
-        "before"
+        `${transformer.name}/before`
       );
       const afterStats = await visitPage(
         browser,
         `file:///${paths.after.path}`,
         slug,
-        "after"
+        `${transformer.name}/after`
       );
 
       stats.push({

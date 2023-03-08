@@ -7,7 +7,7 @@ To run the script:
 ```bash
 npm i
 npm run build
-node ./index.js
+node ./index.js (addSrcSet|addAlternateLinks|addLanguagesToEndOfPage)
 ```
 
 # Note for Working with older versions of Node.js
