@@ -12,7 +12,7 @@ import { fileURLToPath } from "url";
 import topViews from "./topviews.json" assert { type: "json" };
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
-const ARTICLE_COUNT = 10;
+const ARTICLE_COUNT = 100;
 const SECTIONS_CLICKED: number | "all" = 0;
 const BATCH_SIZE = 10;
 
@@ -247,7 +247,7 @@ async function createVersions(
         // Html transfer size to the end of the first paragraph
         beforeHtmlTransferSizeParagraph: beforeStats.htmlTransferSizeParagraph,
         afterHtmlTransferSizeParagraph: afterStats.htmlTransferSizeParagraph,
-        diffHtmlTrasferSizeParagraph:
+        diffHtmlTransferSizeParagraph:
           afterStats.htmlTransferSizeParagraph -
           beforeStats.htmlTransferSizeParagraph,
 
@@ -302,13 +302,30 @@ async function createVersions(
   const diffHtmlSize = stats.map((stat) => stat.diffHtmlSize);
   const diffHtmlTransferSize = stats.map((stat) => stat.diffHtmlTransferSize);
   const diffImageTransferSize = stats.map((stat) => stat.diffImageTransferSize);
+  const diffHtmlSizeParagraph = stats.map((stat) => stat.diffHtmlSizeParagraph);
+  const diffHtmlTransferSizeParagraph = stats.map(
+    (stat) => stat.diffHtmlTransferSizeParagraph
+  );
 
+  console.log(diffHtmlTransferSizeParagraph);
   const aggregate = tablemark([
     {
       // medianDiffImageTransferSize: filesize(median(diffImageTransferSize)),
       // maxDiffImageTransferSize: filesize(max(diffImageTransferSize)),
+
+      medianDiffHtmlSizeParagraph: filesize(median(diffHtmlSizeParagraph)),
+      maxDiffHtmlSizeParagraph: filesize(max(diffHtmlSizeParagraph)),
+
+      medianDiffHtmlTransferSizeParagraph: filesize(
+        median(diffHtmlTransferSizeParagraph)
+      ),
+      maxDiffHtmlTransferSizeParagraph: filesize(
+        max(diffHtmlTransferSizeParagraph)
+      ),
+
       medianDiffHtmlSize: filesize(median(diffHtmlSize)),
       maxDiffHtmlSize: filesize(max(diffHtmlSize)),
+
       medianDiffHtmlTransferSize: filesize(median(diffHtmlTransferSize)),
       maxDiffHtmlTransferDiff: filesize(max(diffHtmlTransferSize)),
     },
