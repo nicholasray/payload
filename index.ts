@@ -163,8 +163,13 @@ async function createVersions(browser: Browser, slug: string, transformer: Trans
 
 (async () => {
   // Setup
+  const clArguments = process.argv;
+  const transform = clArguments[2] || 'addSrcSet';
   const browser = await chromium.launch();
-  const transformer = transforms.addSrcSet;
+  const transformer = transforms[transform];
+  if (!transformer) {
+    throw new Error(`Unknown transform name. Available transforms are ${Object.keys(transforms).join(',')}`);
+  }
   const transformerName = transformer.name;
   fsExtra.emptyDirSync(path.join(__dirname, `/pages/${transformerName}/before`));
   fsExtra.emptyDirSync(path.join(__dirname, `/pages/${transformerName}/after`));
