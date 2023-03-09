@@ -9,7 +9,7 @@ import transforms from "./transforms/index.js";
 import slugify from "slugify";
 import tablemark from "tablemark";
 import { fileURLToPath } from "url";
-import topViews from "./topviews.json" assert { type: "json" };
+import topViews from "./topviews-2023_02.json" assert { type: "json" };
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const ARTICLE_COUNT = 100;
