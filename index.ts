@@ -263,7 +263,7 @@ function emptyDirectories(transformerName: string) {
             const capKey = capFirstLetter(current);
 
             obj[`before${capKey}`] = beforeStats[current];
-            obj[`after${capKey}`] = beforeStats[current];
+            obj[`after${capKey}`] = afterStats[current];
             obj[`diff${capKey}`] = afterStats[current] - beforeStats[current];
 
             return obj;
