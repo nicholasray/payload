@@ -307,7 +307,6 @@ async function createVersions(
     (stat) => stat.diffHtmlTransferSizeParagraph
   );
 
-  console.log(diffHtmlTransferSizeParagraph);
   const aggregate = tablemark([
     {
       // medianDiffImageTransferSize: filesize(median(diffImageTransferSize)),
