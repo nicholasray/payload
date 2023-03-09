@@ -1,3 +1,6 @@
+// Add source map support to make debugging errors easier.
+import sourceMapSupport from "source-map-support";
+sourceMapSupport.install();
 import { filesize } from "filesize";
 import * as fs from "fs";
 import fsExtra from "fs-extra";
@@ -9,11 +12,12 @@ import transforms from "./transforms/index.js";
 import slugify from "slugify";
 import tablemark from "tablemark";
 import { fileURLToPath } from "url";
-import topViews from "./topviews.json" assert { type: "json" };
+import topViews from "./topviews-2023_02.json" assert { type: "json" };
+import { capFirstLetter } from "./transforms/utils.js";
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const ARTICLE_COUNT = 100;
-const SECTIONS_CLICKED: number | "all" = "all";
+const SECTIONS_CLICKED: number | "all" = 0;
 const BATCH_SIZE = 10;
 
 interface Transformer {
@@ -54,24 +58,23 @@ async function visitPage(
   slug: string,
   saveFolder: string
 ) {
-  const context = await createContext(browser, {});
+  const context = await createContext(browser);
   const page = await context.newPage();
   console.log(`Visiting ${slug} and saving image to ${saveFolder}`);
 
   // Sum response size of all image requests.
-  let imageTransferSize = 0;
-  let htmlResponseSize = 0;
   let htmlResponseText = "";
-
-  await page.on("requestfinished", async (request) => {
-    if (request.resourceType() === "document") {
-      if (htmlResponseSize !== 0) {
+  let imageTransferSize = 0;
+  page.on("requestfinished", async (request) => {
+    if (
+      request.resourceType() === "document" &&
+      request.url().endsWith(`${slug}.html`)
+    ) {
+      if (htmlResponseText !== "") {
         throw new Error(
-          "Expected html response size to be zero, but was" + htmlResponseSize
+          "Expected html response text to be empty, but was" + htmlResponseText
         );
       }
-      const sizes = await request.sizes();
-      htmlResponseSize += sizes.responseHeadersSize + sizes.responseBodySize;
       htmlResponseText = await (await request.response()).text();
     }
 
@@ -82,6 +85,29 @@ async function visitPage(
   });
 
   await page.goto(url, { waitUntil: "networkidle" });
+
+  // Find first paragraph so we can calculate the transfer size from the
+  // beginning of the doc to the end of the first paragraph.
+  const firstParagraph = await page
+    .locator("p:not(.mw-empty-elt)")
+    .first()
+    .evaluate((elem) => elem.outerHTML);
+
+  const splitFirstParagraph = htmlResponseText.split(firstParagraph);
+  if (splitFirstParagraph.length !== 2) {
+    throw new Error(
+      `Splitting html by first paragraph for article "${slug}" was expected to result in array length of 2. Instead got ` +
+        splitFirstParagraph.length
+    );
+  }
+
+  const endOfFirstParagraphHtml =
+    htmlResponseText.split(firstParagraph).shift() + firstParagraph;
+
+  await fs.promises.writeFile(
+    path.join(__dirname, `/pages/${saveFolder}/p-${slug}.html`),
+    endOfFirstParagraphHtml
+  );
 
   // Click first section
   let sections = await page
@@ -108,7 +134,9 @@ async function visitPage(
   await context.close();
 
   return {
-    imageTransferSize,
+    // imageTransferSize,
+    htmlSizeParagraph: Buffer.byteLength(endOfFirstParagraphHtml, "utf8"),
+    htmlTransferSizeParagraph: await gzipSize(endOfFirstParagraphHtml),
     htmlSize: Buffer.byteLength(htmlResponseText, "utf8"),
     htmlTransferSize: await gzipSize(htmlResponseText),
   };
@@ -128,17 +156,25 @@ const makePage = async (context, host, path) => {
 };
 
 /**
- * Create two versions of the same page — one version will contain lazy loaded
- * images without the srcset attribute, the other version will contain lazy
- * loaded images with the srcset attribute.
+ * Create two versions of the same page — "before" and "after". The "before"
+ * version is almost identical to the production page. The "after" version takes
+ * the "before" version and applies transformations to it.
  */
-async function createVersions(browser: Browser, slug: string, transformer: Transformer, host: string) {
+async function createVersions(
+  browser: Browser,
+  slug: string,
+  transformer: Transformer,
+  host: string
+) {
   const context = await createContext(browser, {
     javaScriptEnabled: false,
   });
-  const page = await makePage(context, host, `wiki/${slug}` );
+  const page = await makePage(context, host, `wiki/${slug}`);
   const beforeHtml = await page.content();
-  const beforePath = path.join(__dirname, `/pages/${transformer.name}/before/${slug}.html`);
+  const beforePath = path.join(
+    __dirname,
+    `/pages/${transformer.name}/before/${slug}.html`
+  );
   await fs.promises.writeFile(beforePath, beforeHtml);
 
   // Transform HTML.
@@ -147,7 +183,10 @@ async function createVersions(browser: Browser, slug: string, transformer: Trans
   await page.evaluate(transformer.transform, args);
 
   const afterHtml = await page.content();
-  const afterPath = path.join(__dirname, `/pages/${transformer.name}/after/${slug}.html`);
+  const afterPath = path.join(
+    __dirname,
+    `/pages/${transformer.name}/after/${slug}.html`
+  );
   await fs.promises.writeFile(afterPath, afterHtml);
   await context.close();
 
@@ -161,23 +200,35 @@ async function createVersions(browser: Browser, slug: string, transformer: Trans
   };
 }
 
+function emptyDirectories(transformerName: string) {
+  fsExtra.emptyDirSync(
+    path.join(__dirname, `/pages/${transformerName}/before`)
+  );
+  fsExtra.emptyDirSync(path.join(__dirname, `/pages/${transformerName}/after`));
+}
+
 (async () => {
   // Setup
   const clArguments = process.argv;
-  const transform = clArguments[2] || 'addSrcSet';
+  const transform = clArguments[2] || "addSrcSet";
   const browser = await chromium.launch();
   const transformer = transforms[transform];
   if (!transformer) {
-    throw new Error(`Unknown transform name. Available transforms are ${Object.keys(transforms).join(',')}`);
+    throw new Error(
+      `Unknown transform name. Available transforms are ${Object.keys(
+        transforms
+      ).join(",")}`
+    );
   }
   const transformerName = transformer.name;
-  fsExtra.emptyDirSync(path.join(__dirname, `/pages/${transformerName}/before`));
-  fsExtra.emptyDirSync(path.join(__dirname, `/pages/${transformerName}/after`));
+  emptyDirectories(transformerName);
 
   const stats = [];
   let queue = topViews.slice(0, ARTICLE_COUNT);
 
-  console.log(`Visiting ${queue.length} pages with transform ${transformerName}...`);
+  console.log(
+    `Visiting ${queue.length} pages with transform ${transformerName}...`
+  );
   while (queue.length) {
     const views = queue.splice(0, BATCH_SIZE);
 
@@ -186,7 +237,12 @@ async function createVersions(browser: Browser, slug: string, transformer: Trans
       const slug = slugify(view.article, "_");
 
       // Create two versions of the same page.
-      const paths = await createVersions(browser, slug, transformer, 'https://en.m.wikipedia.org');
+      const paths = await createVersions(
+        browser,
+        slug,
+        transformer,
+        "https://en.m.wikipedia.org"
+      );
 
       const beforeStats = await visitPage(
         browser,
@@ -201,33 +257,33 @@ async function createVersions(browser: Browser, slug: string, transformer: Trans
         `${transformer.name}/after`
       );
 
-      stats.push({
-        page: slug,
-        beforeHtmlSize: beforeStats.htmlSize,
-        afterHtmlSize: afterStats.htmlSize,
-        diffHtmlSize: afterStats.htmlSize - beforeStats.htmlSize,
-        beforeHtmlTransferSize: beforeStats.htmlTransferSize,
-        afterHtmlTransferSize: afterStats.htmlTransferSize,
-        diffHtmlTransferSize:
-          afterStats.htmlTransferSize - beforeStats.htmlTransferSize,
-        beforeImageTransferSize: beforeStats.imageTransferSize,
-        afterImageTransferSize: afterStats.imageTransferSize,
-        diffImageTransferSize:
-          afterStats.imageTransferSize - beforeStats.imageTransferSize,
-      });
+      stats.push(
+        Object.keys(beforeStats).reduce(
+          (obj, current) => {
+            const capKey = capFirstLetter(current);
+
+            obj[`before${capKey}`] = beforeStats[current];
+            obj[`after${capKey}`] = afterStats[current];
+            obj[`diff${capKey}`] = afterStats[current] - beforeStats[current];
+
+            return obj;
+          },
+          { page: slug }
+        )
+      );
     });
 
     await Promise.all(promises);
   }
 
-  // Sort by image size
+  // Sort by html transfer size.
   stats.sort((a, b) => {
-    if (a.diffImageTransferSize < b.diffImageTransferSize) {
+    if (a.diffHtmlTransferSize < b.diffHtmlTransferSize) {
       // a is less than b.
       return -1;
     }
 
-    if (a.diffImageTransferSize > b.diffImageTransferSize) {
+    if (a.diffHtmlTransferSize > b.diffHtmlTransferSize) {
       // b is less than a.
       return 1;
     }
@@ -252,23 +308,31 @@ async function createVersions(browser: Browser, slug: string, transformer: Trans
     })
   );
 
-  const diffHtmlSize = stats.map((stat) => stat.diffHtmlSize);
-  const diffHtmlTransferSize = stats.map((stat) => stat.diffHtmlTransferSize);
-  const diffImageTransferSize = stats.map((stat) => stat.diffImageTransferSize);
+  const differences = Object.keys(stats[0]).reduce((obj, current) => {
+    if (!current.startsWith("diff")) {
+      return obj;
+    }
+
+    obj[current] = stats.map((stat) => stat[current]);
+
+    return obj;
+  }, {});
 
   const aggregate = tablemark([
-    {
-      medianDiffHtmlSize: filesize(median(diffHtmlSize)),
-      maxDiffHtmlSize: filesize(max(diffHtmlSize)),
-      medianDiffHtmlTransferSize: filesize(median(diffHtmlTransferSize)),
-      maxDiffHtmlTransferDiff: filesize(max(diffHtmlTransferSize)),
-      medianDiffImageTransferSize: filesize(median(diffImageTransferSize)),
-      maxDiffImageTransferSize: filesize(max(diffImageTransferSize)),
-    },
+    Object.keys(differences).reduce((obj, current) => {
+      obj[`median${capFirstLetter(current)}`] = filesize(
+        median(differences[current])
+      );
+      obj[`max${capFirstLetter(current)}`] = filesize(
+        max(differences[current])
+      );
+
+      return obj;
+    }, {}),
   ]);
 
   await fs.promises.writeFile(
-    path.join(__dirname, "output.md"),
+    path.join(__dirname, `output-${transformerName}.md`),
     statsFormatted + "\n\n" + aggregate
   );
 
