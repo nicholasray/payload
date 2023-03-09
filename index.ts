@@ -132,9 +132,9 @@ const makePage = async (context, host, path) => {
 };
 
 /**
- * Create two versions of the same page — one version will contain lazy loaded
- * images without the srcset attribute, the other version will contain lazy
- * loaded images with the srcset attribute.
+ * Create two versions of the same page — "before" and "after". The "before"
+ * version is almost identical to the production page. The "after" version takes
+ * the "before" version and applies transformations to it.
  */
 async function createVersions(
   browser: Browser,
@@ -299,9 +299,9 @@ async function createVersions(
     })
   );
 
+  const diffImageTransferSize = stats.map((stat) => stat.diffImageTransferSize);
   const diffHtmlSize = stats.map((stat) => stat.diffHtmlSize);
   const diffHtmlTransferSize = stats.map((stat) => stat.diffHtmlTransferSize);
-  const diffImageTransferSize = stats.map((stat) => stat.diffImageTransferSize);
   const diffHtmlSizeParagraph = stats.map((stat) => stat.diffHtmlSizeParagraph);
   const diffHtmlTransferSizeParagraph = stats.map(
     (stat) => stat.diffHtmlTransferSizeParagraph
