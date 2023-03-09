@@ -1,3 +1,6 @@
+// Add source map support to make debugging errors easier.
+import sourceMapSupport from "source-map-support";
+sourceMapSupport.install();
 import { filesize } from "filesize";
 import * as fs from "fs";
 import fsExtra from "fs-extra";
@@ -10,6 +13,7 @@ import slugify from "slugify";
 import tablemark from "tablemark";
 import { fileURLToPath } from "url";
 import topViews from "./topviews-2023_02.json" assert { type: "json" };
+import { capFirstLetter } from "./transforms/utils.js";
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const ARTICLE_COUNT = 100;
@@ -60,7 +64,6 @@ async function visitPage(
 
   // Sum response size of all image requests.
   let imageTransferSize = 0;
-
   page.on("requestfinished", async (request) => {
     if (request.resourceType() === "image") {
       const sizes = await request.sizes();
@@ -69,7 +72,7 @@ async function visitPage(
   });
 
   await page.goto(url, { waitUntil: "networkidle" });
-  let htmlResponseText = await page.content();
+  const htmlResponseText = await page.content();
 
   // Find first paragraph so we can roughly estimate impact of largest contentful paint.
   const firstParagraph = await page
@@ -110,7 +113,7 @@ async function visitPage(
   await context.close();
 
   return {
-    imageTransferSize,
+    // imageTransferSize,
     htmlSizeParagraph: Buffer.byteLength(endOfFirstParagraphHtml, "utf8"),
     htmlTransferSizeParagraph: await gzipSize(endOfFirstParagraphHtml),
     htmlSize: Buffer.byteLength(htmlResponseText, "utf8"),
@@ -176,6 +179,13 @@ async function createVersions(
   };
 }
 
+function emptyDirectories(transformerName: string) {
+  fsExtra.emptyDirSync(
+    path.join(__dirname, `/pages/${transformerName}/before`)
+  );
+  fsExtra.emptyDirSync(path.join(__dirname, `/pages/${transformerName}/after`));
+}
+
 (async () => {
   // Setup
   const clArguments = process.argv;
@@ -190,10 +200,7 @@ async function createVersions(
     );
   }
   const transformerName = transformer.name;
-  fsExtra.emptyDirSync(
-    path.join(__dirname, `/pages/${transformerName}/before`)
-  );
-  fsExtra.emptyDirSync(path.join(__dirname, `/pages/${transformerName}/after`));
+  emptyDirectories(transformerName);
 
   const stats = [];
   let queue = topViews.slice(0, ARTICLE_COUNT);
@@ -229,39 +236,20 @@ async function createVersions(
         `${transformer.name}/after`
       );
 
-      stats.push({
-        page: slug,
+      stats.push(
+        Object.keys(beforeStats).reduce(
+          (obj, current) => {
+            const capKey = capFirstLetter(current);
 
-        // Image transfer size
-        // beforeImageTransferSize: beforeStats.imageTransferSize,
-        // afterImageTransferSize: afterStats.imageTransferSize,
-        // diffImageTransferSize:
-        //   afterStats.imageTransferSize - beforeStats.imageTransferSize,
+            obj[`before${capKey}`] = beforeStats[current];
+            obj[`after${capKey}`] = beforeStats[current];
+            obj[`diff${capKey}`] = afterStats[current] - beforeStats[current];
 
-        // Html size to the end of the first paragraph
-        beforeHtmlSizeParagraph: beforeStats.htmlSizeParagraph,
-        afterHtmlSizeParagraph: afterStats.htmlSizeParagraph,
-        diffHtmlSizeParagraph:
-          afterStats.htmlSizeParagraph - beforeStats.htmlSizeParagraph,
-
-        // Html transfer size to the end of the first paragraph
-        beforeHtmlTransferSizeParagraph: beforeStats.htmlTransferSizeParagraph,
-        afterHtmlTransferSizeParagraph: afterStats.htmlTransferSizeParagraph,
-        diffHtmlTransferSizeParagraph:
-          afterStats.htmlTransferSizeParagraph -
-          beforeStats.htmlTransferSizeParagraph,
-
-        // Html size
-        beforeHtmlSize: beforeStats.htmlSize,
-        afterHtmlSize: afterStats.htmlSize,
-        diffHtmlSize: afterStats.htmlSize - beforeStats.htmlSize,
-
-        // Html transfer size
-        beforeHtmlTransferSize: beforeStats.htmlTransferSize,
-        afterHtmlTransferSize: afterStats.htmlTransferSize,
-        diffHtmlTransferSize:
-          afterStats.htmlTransferSize - beforeStats.htmlTransferSize,
-      });
+            return obj;
+          },
+          { page: slug }
+        )
+      );
     });
 
     await Promise.all(promises);
@@ -299,35 +287,27 @@ async function createVersions(
     })
   );
 
-  const diffImageTransferSize = stats.map((stat) => stat.diffImageTransferSize);
-  const diffHtmlSize = stats.map((stat) => stat.diffHtmlSize);
-  const diffHtmlTransferSize = stats.map((stat) => stat.diffHtmlTransferSize);
-  const diffHtmlSizeParagraph = stats.map((stat) => stat.diffHtmlSizeParagraph);
-  const diffHtmlTransferSizeParagraph = stats.map(
-    (stat) => stat.diffHtmlTransferSizeParagraph
-  );
+  const differences = Object.keys(stats[0]).reduce((obj, current) => {
+    if (!current.startsWith("diff")) {
+      return obj;
+    }
+
+    obj[current] = stats.map((stat) => stat[current]);
+
+    return obj;
+  }, {});
 
   const aggregate = tablemark([
-    {
-      // medianDiffImageTransferSize: filesize(median(diffImageTransferSize)),
-      // maxDiffImageTransferSize: filesize(max(diffImageTransferSize)),
+    Object.keys(differences).reduce((obj, current) => {
+      obj[`median${capFirstLetter(current)}`] = filesize(
+        median(differences[current])
+      );
+      obj[`max${capFirstLetter(current)}`] = filesize(
+        max(differences[current])
+      );
 
-      medianDiffHtmlSizeParagraph: filesize(median(diffHtmlSizeParagraph)),
-      maxDiffHtmlSizeParagraph: filesize(max(diffHtmlSizeParagraph)),
-
-      medianDiffHtmlTransferSizeParagraph: filesize(
-        median(diffHtmlTransferSizeParagraph)
-      ),
-      maxDiffHtmlTransferSizeParagraph: filesize(
-        max(diffHtmlTransferSizeParagraph)
-      ),
-
-      medianDiffHtmlSize: filesize(median(diffHtmlSize)),
-      maxDiffHtmlSize: filesize(max(diffHtmlSize)),
-
-      medianDiffHtmlTransferSize: filesize(median(diffHtmlTransferSize)),
-      maxDiffHtmlTransferDiff: filesize(max(diffHtmlTransferSize)),
-    },
+      return obj;
+    }, {}),
   ]);
 
   await fs.promises.writeFile(
