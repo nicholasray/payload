@@ -6,3 +6,4 @@ pages
 index.js
 output.md
 *.js.map
+output-*.md
