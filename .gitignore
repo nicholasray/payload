@@ -5,3 +5,4 @@ node_modules/
 pages
 index.js
 output.md
+*.js.map

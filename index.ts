@@ -58,13 +58,26 @@ async function visitPage(
   slug: string,
   saveFolder: string
 ) {
-  const context = await createContext(browser, {});
+  const context = await createContext(browser);
   const page = await context.newPage();
   console.log(`Visiting ${slug} and saving image to ${saveFolder}`);
 
   // Sum response size of all image requests.
+  let htmlResponseText = "";
   let imageTransferSize = 0;
   page.on("requestfinished", async (request) => {
+    if (
+      request.resourceType() === "document" &&
+      request.url().endsWith(`${slug}.html`)
+    ) {
+      if (htmlResponseText !== "") {
+        throw new Error(
+          "Expected html response text to be empty, but was" + htmlResponseText
+        );
+      }
+      htmlResponseText = await (await request.response()).text();
+    }
+
     if (request.resourceType() === "image") {
       const sizes = await request.sizes();
       imageTransferSize += sizes.responseHeadersSize + sizes.responseBodySize;
@@ -72,13 +85,21 @@ async function visitPage(
   });
 
   await page.goto(url, { waitUntil: "networkidle" });
-  const htmlResponseText = await page.content();
 
-  // Find first paragraph so we can roughly estimate impact of largest contentful paint.
+  // Find first paragraph so we can calculate the transfer size from the
+  // beginning of the doc to the end of the first paragraph.
   const firstParagraph = await page
     .locator("p:not(.mw-empty-elt)")
     .first()
     .evaluate((elem) => elem.outerHTML);
+
+  const splitFirstParagraph = htmlResponseText.split(firstParagraph);
+  if (splitFirstParagraph.length !== 2) {
+    throw new Error(
+      `Splitting html by first paragraph for article "${slug}" was expected to result in array length of 2. Instead got ` +
+        splitFirstParagraph.length
+    );
+  }
 
   const endOfFirstParagraphHtml =
     htmlResponseText.split(firstParagraph).shift() + firstParagraph;
@@ -311,7 +332,7 @@ function emptyDirectories(transformerName: string) {
   ]);
 
   await fs.promises.writeFile(
-    path.join(__dirname, "output.md"),
+    path.join(__dirname, `output-${transformerName}.md`),
     statsFormatted + "\n\n" + aggregate
   );
 
