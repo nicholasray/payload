@@ -1,6 +1,6 @@
-A script I made to help see the image and html payload effects of adding the `srcset` attribute to lazy loaded images on Wikipedia's mobile site.
+A script I made to help see the effect that mobile wikipedia html transformations had on payload sizes.
 
-The script compares the image and html payload sizes for two different user scenrios. See https://phabricator.wikimedia.org/T293303#8630702 for the results and analysis.
+See https://phabricator.wikimedia.org/T293303#8630702 and https://phabricator.wikimedia.org/T326829#8684377 for examples of how it was used.
 
 To run the script:
 
