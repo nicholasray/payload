@@ -1,4 +1,4 @@
-A script I made to help see the effect that mobile wikipedia html transformations had on payload sizes.
+A script help see the effects that mobile wikipedia html transformations have on payload sizes.
 
 See https://phabricator.wikimedia.org/T293303#8630702 and https://phabricator.wikimedia.org/T326829#8684377 for examples of how it was used.
 
