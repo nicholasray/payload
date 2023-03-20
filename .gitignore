@@ -6,6 +6,6 @@ node_modules/
 /test-results/
 /playwright-report/
 /playwright/.cache/
-index.js
+payload.js
 *.js.map
 .eslintcache

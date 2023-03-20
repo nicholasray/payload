@@ -7,7 +7,7 @@ To run the script:
 ```bash
 npm i
 npm run build
-node ./index.js (addSrcSet|addAlternateLinks|addLanguagesToEndOfPage)
+node ./payload.js (addSrcSet|addAlternateLinks|addLanguagesToEndOfPage)
 ```
 
 # Note for Working with older versions of Node.js
@@ -15,5 +15,5 @@ node ./index.js (addSrcSet|addAlternateLinks|addLanguagesToEndOfPage)
 You may need to enable the experimental json modules feature.
 
 ```
-node --experimental-json-modules index.js
+node --experimental-json-modules payload.js
 ```
