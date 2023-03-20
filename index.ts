@@ -24,6 +24,8 @@ const PAGES_DIR = `${OUTPUT_DIR}/pages`;
 const ARTICLE_COUNT = 100;
 const SECTIONS_CLICKED: number | "all" = 0;
 const BATCH_SIZE = 10;
+import pLimit from "p-limit";
+const limit = pLimit(BATCH_SIZE);
 
 interface Transformer {
   name: string;
@@ -259,10 +261,9 @@ function emptyDirectories(transformerName: string) {
   console.log(
     `Visiting ${queue.length} pages with transform ${transformerName}...`
   );
-  while (queue.length) {
-    const views = queue.splice(0, BATCH_SIZE);
 
-    const promises = views.map(async (view) => {
+  const promises = queue.map(async (view) => {
+    return limit(async () => {
       // eslint-disable-next-line @typescript-eslint/ban-ts-comment
       // @ts-ignore
       const slug = slugify(view.article, "_");
@@ -303,9 +304,9 @@ function emptyDirectories(transformerName: string) {
         )
       );
     });
+  });
 
-    await Promise.all(promises);
-  }
+  await Promise.all(promises);
 
   // Sort by html transfer size.
   stats.sort((a, b) => {
