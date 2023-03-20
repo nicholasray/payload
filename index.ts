@@ -19,6 +19,8 @@ import { capFirstLetter } from "./transforms/utils.js";
 const __filename = fileURLToPath(import.meta.url);
 // eslint-disable-next-line no-underscore-dangle
 const __dirname = path.dirname(__filename);
+const OUTPUT_DIR = "output";
+const PAGES_DIR = `${OUTPUT_DIR}/pages`;
 const ARTICLE_COUNT = 100;
 const SECTIONS_CLICKED: number | "all" = 0;
 const BATCH_SIZE = 10;
@@ -119,7 +121,7 @@ async function visitPage(
     htmlResponseText.split(firstParagraph).shift() + firstParagraph;
 
   await fs.promises.writeFile(
-    path.join(__dirname, `/pages/${saveFolder}/p-${slug}.html`),
+    path.join(__dirname, PAGES_DIR, `${saveFolder}/p-${slug}.html`),
     endOfFirstParagraphHtml
   );
 
@@ -141,7 +143,7 @@ async function visitPage(
   // Wait for images to load.
   await page.waitForTimeout(3000);
   await page.screenshot({
-    path: path.join(__dirname, `/pages/${saveFolder}/${slug}.jpg`),
+    path: path.join(__dirname, PAGES_DIR, `${saveFolder}/${slug}.jpg`),
   });
 
   // Teardown
@@ -162,19 +164,6 @@ const makePage = async (
   path: string
 ) => {
   const page = await context.newPage();
-
-  let headers;
-  page.on("requestfinished", async (request) => {
-    if (request.resourceType() === "document" && request.url().endsWith(path)) {
-      if (headers !== "") {
-        throw new Error("Expected headers text to be empty, but was" + headers);
-      }
-
-      headers = await (await request.response()).allHeaders();
-      headers = JSON.stringify(headers, null, 2);
-    }
-  });
-
   await page.goto(`${host}/${path}`, {
     waitUntil: "load",
   });
@@ -210,7 +199,8 @@ async function createVersions(
   const beforeHtml = await page.content();
   const beforePath = path.join(
     __dirname,
-    `/pages/${transformer.name}/before/${slug}.html`
+    PAGES_DIR,
+    `${transformer.name}/before/${slug}.html`
   );
   await fs.promises.writeFile(beforePath, beforeHtml);
 
@@ -222,7 +212,8 @@ async function createVersions(
   const afterHtml = await page.content();
   const afterPath = path.join(
     __dirname,
-    `/pages/${transformer.name}/after/${slug}.html`
+    PAGES_DIR,
+    `${transformer.name}/after/${slug}.html`
   );
   await fs.promises.writeFile(afterPath, afterHtml);
   await context.close();
@@ -239,9 +230,11 @@ async function createVersions(
 
 function emptyDirectories(transformerName: string) {
   fsExtra.emptyDirSync(
-    path.join(__dirname, `/pages/${transformerName}/before`)
+    path.join(__dirname, PAGES_DIR, `${transformerName}/before`)
   );
-  fsExtra.emptyDirSync(path.join(__dirname, `/pages/${transformerName}/after`));
+  fsExtra.emptyDirSync(
+    path.join(__dirname, PAGES_DIR, `${transformerName}/after`)
+  );
 }
 
 (async () => {
@@ -370,12 +363,12 @@ function emptyDirectories(transformerName: string) {
   ]);
 
   await fs.promises.writeFile(
-    path.join(__dirname, `output-${transformerName}.md`),
+    path.join(__dirname, OUTPUT_DIR, `${transformerName}.md`),
     statsFormatted + "\n\n" + aggregate
   );
 
-  console.log(statsFormatted);
   console.log(aggregate);
+  console.log(statsFormatted);
 
   // Teardown
   await browser.close();

@@ -1,10 +1,11 @@
+# App folders
+output
+
+# Other
 node_modules/
 /test-results/
 /playwright-report/
 /playwright/.cache/
-pages
 index.js
-output.md
 *.js.map
-output-*.md
 .eslintcache
