@@ -6,15 +6,18 @@ import * as fs from "fs";
 import fsExtra from "fs-extra";
 import { gzipSize } from "gzip-size";
 import path from "node:path";
-import { Browser, chromium, devices } from "playwright";
+import { Browser, BrowserContext, chromium, devices } from "playwright";
 import { max, median } from "simple-statistics";
 import transforms from "./transforms/index.js";
 import slugify from "slugify";
+// eslint-disable-next-line node/no-missing-import
 import tablemark from "tablemark";
 import { fileURLToPath } from "url";
 import topViews from "./topviews-2023_02.json" assert { type: "json" };
 import { capFirstLetter } from "./transforms/utils.js";
+// eslint-disable-next-line no-underscore-dangle
 const __filename = fileURLToPath(import.meta.url);
+// eslint-disable-next-line no-underscore-dangle
 const __dirname = path.dirname(__filename);
 const ARTICLE_COUNT = 100;
 const SECTIONS_CLICKED: number | "all" = 0;
@@ -22,15 +25,18 @@ const BATCH_SIZE = 10;
 
 interface Transformer {
   name: string;
-  getArgs: Function;
-  transform: Function;
+  getArgs: (context: BrowserContext, slug: string) => [];
+  transform: () => void;
 }
 
 /**
  * Scrolls to the bottom of the page.
  */
 async function scrollToBottom() {
-  const delay = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+  const delay = (ms) =>
+    new Promise((resolve) => {
+      setTimeout(resolve, ms);
+    });
   for (let i = 0; i < document.body.scrollHeight; i += 100) {
     window.scrollTo(0, i);
     await delay(20);
@@ -39,6 +45,9 @@ async function scrollToBottom() {
 
 /**
  * Creates a browser using iPhone 11 context.
+ *
+ * @param browser
+ * @param opts
  */
 async function createContext(browser: Browser, opts = {}) {
   return await browser.newContext({
@@ -51,6 +60,11 @@ async function createContext(browser: Browser, opts = {}) {
 /**
  * Visits a url, clicks a number of sections, scrolls to the bottom of the page,
  * and sums the downloaded html and image transfers.
+ *
+ * @param browser
+ * @param url
+ * @param slug
+ * @param saveFolder
  */
 async function visitPage(
   browser: Browser,
@@ -110,7 +124,7 @@ async function visitPage(
   );
 
   // Click first section
-  let sections = await page
+  const sections = await page
     .locator(".mw-parser-output > .collapsible-heading")
     .all();
 
@@ -134,7 +148,7 @@ async function visitPage(
   await context.close();
 
   return {
-    // imageTransferSize,
+    imageTransferSize,
     htmlSizeParagraph: Buffer.byteLength(endOfFirstParagraphHtml, "utf8"),
     htmlTransferSizeParagraph: await gzipSize(endOfFirstParagraphHtml),
     htmlSize: Buffer.byteLength(htmlResponseText, "utf8"),
@@ -142,11 +156,29 @@ async function visitPage(
   };
 }
 
-const makePage = async (context, host, path) => {
+const makePage = async (
+  context: BrowserContext,
+  host: string,
+  path: string
+) => {
   const page = await context.newPage();
+
+  let headers;
+  page.on("requestfinished", async (request) => {
+    if (request.resourceType() === "document" && request.url().endsWith(path)) {
+      if (headers !== "") {
+        throw new Error("Expected headers text to be empty, but was" + headers);
+      }
+
+      headers = await (await request.response()).allHeaders();
+      headers = JSON.stringify(headers, null, 2);
+    }
+  });
+
   await page.goto(`${host}/${path}`, {
     waitUntil: "load",
   });
+
   await page.evaluate((host) => {
     const base = document.createElement("base");
     base.href = host;
@@ -159,6 +191,11 @@ const makePage = async (context, host, path) => {
  * Create two versions of the same page — "before" and "after". The "before"
  * version is almost identical to the production page. The "after" version takes
  * the "before" version and applies transformations to it.
+ *
+ * @param browser
+ * @param slug
+ * @param transformer
+ * @param host
  */
 async function createVersions(
   browser: Browser,
@@ -224,7 +261,7 @@ function emptyDirectories(transformerName: string) {
   emptyDirectories(transformerName);
 
   const stats = [];
-  let queue = topViews.slice(0, ARTICLE_COUNT);
+  const queue = topViews.slice(0, ARTICLE_COUNT);
 
   console.log(
     `Visiting ${queue.length} pages with transform ${transformerName}...`
@@ -233,6 +270,7 @@ function emptyDirectories(transformerName: string) {
     const views = queue.splice(0, BATCH_SIZE);
 
     const promises = views.map(async (view) => {
+      // eslint-disable-next-line @typescript-eslint/ban-ts-comment
       // @ts-ignore
       const slug = slugify(view.article, "_");
 

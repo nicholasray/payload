@@ -1,0 +1,31 @@
+{
+  "extends": [
+    "wikimedia",
+    "wikimedia/node",
+    "wikimedia/language/es2021",
+    "plugin:@typescript-eslint/recommended",
+    "prettier"
+  ],
+  "parser": "@typescript-eslint/parser",
+  "plugins": ["@typescript-eslint"],
+  "root": true,
+  "env": {
+    "browser": true,
+    "node": true
+  },
+  "rules": {
+    "strict": "off",
+    "yml/no-empty-mapping-value": "off",
+    "jsdoc/require-param-type": "off",
+    "no-shadow": "off",
+    "jsdoc/require-param": "off"
+  },
+  "parserOptions": {
+    "ecmaVersion": 13
+  },
+  "settings": {
+    "jsdoc": {
+      "mode": "typescript"
+    }
+  }
+}

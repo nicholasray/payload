@@ -1,0 +1,7 @@
+dist
+node_modules
+.github
+.changeset
+index.js
+index.js.map
+*.json
