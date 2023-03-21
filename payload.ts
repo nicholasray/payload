@@ -276,18 +276,20 @@ function emptyDirectories(transformerName: string) {
         "https://en.m.wikipedia.org"
       );
 
-      const beforeStats = await visitPage(
-        browser,
-        `file:///${paths.before.path}`,
-        slug,
-        `${transformer.name}/before`
-      );
-      const afterStats = await visitPage(
-        browser,
-        `file:///${paths.after.path}`,
-        slug,
-        `${transformer.name}/after`
-      );
+      const [beforeStats, afterStats] = await Promise.all([
+        visitPage(
+          browser,
+          `file:///${paths.before.path}`,
+          slug,
+          `${transformer.name}/before`
+        ),
+        visitPage(
+          browser,
+          `file:///${paths.after.path}`,
+          slug,
+          `${transformer.name}/after`
+        ),
+      ]);
 
       stats.push(
         Object.keys(beforeStats).reduce(
