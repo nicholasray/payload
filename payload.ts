@@ -152,7 +152,7 @@ async function visitPage(
   await context.close();
 
   return {
-    imageTransferSize,
+    // imageTransferSize,
     htmlSizeParagraph: Buffer.byteLength(endOfFirstParagraphHtml, "utf8"),
     htmlTransferSizeParagraph: await gzipSize(endOfFirstParagraphHtml),
     htmlSize: Buffer.byteLength(htmlResponseText, "utf8"),
@@ -367,7 +367,7 @@ function emptyDirectories(transformerName: string) {
 
   await fs.promises.writeFile(
     path.join(__dirname, OUTPUT_DIR, `${transformerName}.md`),
-    statsFormatted + "\n\n" + aggregate
+    aggregate + "\n\n" + statsFormatted
   );
 
   console.log(aggregate);
