@@ -197,7 +197,7 @@ async function createVersions(
   const context = await createContext(browser, {
     javaScriptEnabled: false,
   });
-  const page = await makePage(context, host, `wiki/${slug}`);
+  const page = await makePage(context, host, `wiki/${slug}?cache=false`);
   const beforeHtml = await page.content();
   const beforePath = path.join(
     __dirname,
